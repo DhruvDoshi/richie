@@ -1,3 +1,5 @@
+Updated by Dhruv Doshi
+
 # Richie, the best OpenSource CMS to build education portals
 
 [![CircleCI](https://circleci.com/gh/openfun/richie/tree/master.svg?style=svg)](https://circleci.com/gh/openfun/richie/tree/master)
