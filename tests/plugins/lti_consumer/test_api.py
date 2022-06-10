@@ -32,7 +32,7 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
     )
     def test_lti_consumer_api_get_context(self, mock_params):
         """
-        Instianciating this plugin and make a request to its API endpoint
+        Instantiating this plugin and make a request to its API endpoint
         to get context
         """
         page = create_i18n_page("A page")
@@ -48,7 +48,8 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         )
 
         response = self.client.get(
-            f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/"
+            f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/",
+            {"user_id": "richie"},
         )
         self.assertEqual(response.status_code, 200)
         content = json.loads(response.content)
@@ -56,7 +57,9 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         self.assertIn(content["url"], lti_consumer.url)
         self.assertTrue(content["is_automatic_resizing"])
         self.assertEqual(content["content_parameters"], "test_content")
-        mock_params.assert_called_once_with(edit=False)
+        mock_params.assert_called_once_with(
+            user_infos={"user_id": "richie"}, edit=False
+        )
 
     @mock.patch.object(
         LTIConsumer, "get_content_parameters", return_value="test_content"
@@ -93,7 +96,8 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         )
 
         request = RequestFactory().get(
-            f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/"
+            f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/",
+            {"user_id": "richie"},
         )
         request.user = user
         request.session = {}
@@ -104,7 +108,7 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         response = view_set.get_context(request, "v1.0", model_instance.pk)
         self.assertEqual(response.status_code, 200)
 
-        mock_params.assert_called_once_with(edit=True)
+        mock_params.assert_called_once_with(user_infos={"user_id": "richie"}, edit=True)
 
     @mock.patch.object(
         LTIConsumer, "get_content_parameters", return_value="test_content"
@@ -145,7 +149,8 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
             )
 
         request = RequestFactory().get(
-            f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/"
+            f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/",
+            {"user_id": "richie"},
         )
         request.user = user
         request.session = {}
@@ -156,7 +161,9 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         response = view_set.get_context(request, "v1.0", model_instance.pk)
         self.assertEqual(response.status_code, 200)
 
-        mock_params.assert_called_once_with(edit=False)
+        mock_params.assert_called_once_with(
+            user_infos={"user_id": "richie"}, edit=False
+        )
 
     @mock.patch.object(
         LTIConsumer, "get_content_parameters", return_value="test_content"
@@ -189,7 +196,8 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
             }
         ):
             response = self.client.get(
-                f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/"
+                f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/",
+                {"user_id": "richie"},
             )
         self.assertEqual(response.status_code, 200)
         content = json.loads(response.content)
@@ -199,7 +207,8 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         # Set from the instance
         with override_settings(RICHIE_LTI_PROVIDERS={"lti_provider_test": {}}):
             response = self.client.get(
-                f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/"
+                f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/",
+                {"user_id": "richie"},
             )
         self.assertEqual(response.status_code, 200)
         content = json.loads(response.content)
@@ -230,7 +239,8 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
 
         with override_settings(RICHIE_LTI_PROVIDERS={"lti_provider_test": {}}):
             response = self.client.get(
-                f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/"
+                f"/api/v1.0/plugins/lti-consumer/{model_instance.pk}/context/",
+                {"user_id": "richie"},
             )
         self.assertEqual(response.status_code, 200)
         content = json.loads(response.content)
@@ -243,9 +253,23 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         a 404 error response.
         """
         response = self.client.get(
-            "/api/v1.0/plugins/lti-consumer/15003/context/", follow=True
+            "/api/v1.0/plugins/lti-consumer/15003/context/",
+            {"user_id": "richie"},
+            follow=True,
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_lti_consumer_api_get_context_without_user_id(self):
+        """
+        Making a context API request without providing user_id should return a 400 response
+        """
+        response = self.client.get(
+            "/api/v1.0/plugins/lti-consumer/15003/context/", follow=True
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            json.loads(response.content), {"user_id": ["This parameter is required."]}
+        )
 
     @override_settings(
         CACHES={
@@ -268,8 +292,18 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         for 5 minutes to optimize db accesses without returning
         stale oauth credentials.
         """
+
+        def create_request(data):
+            request = RequestFactory().get("/", data)
+            request.user = AnonymousUser()
+            request.session = {}
+            request.toolbar = CMSToolbar(request)
+            return request
+
         placeholder = Placeholder.objects.create(slot="test")
 
+        request = create_request({"user_id": "richie"})
+        view_set = LTIConsumerViewsSet()
         lti_consumer = LTIConsumerFactory()
         model_instance = add_plugin(
             placeholder,
@@ -278,17 +312,13 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
             url=lti_consumer.url,
             lti_provider_id=lti_consumer.lti_provider_id,
         )
-        request = RequestFactory().get("/")
-        request.user = AnonymousUser()
-        request.session = {}
-        request.toolbar = CMSToolbar(request)
-        view_set = LTIConsumerViewsSet()
 
         with self.assertNumQueries(1):
             view_set.get_context(request, "v1.0", model_instance.pk)
 
-        mock_params.assert_called_once_with(edit=False)
-
+        mock_params.assert_called_once_with(
+            user_infos={"user_id": "richie"}, edit=False
+        )
         mock_params.reset_mock()
 
         with self.assertNumQueries(0):
@@ -301,8 +331,9 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
         with self.assertNumQueries(1):
             view_set.get_context(request, "v1.0", model_instance.pk)
 
-        mock_params.assert_called_once_with(edit=False)
-
+        mock_params.assert_called_once_with(
+            user_infos={"user_id": "richie"}, edit=False
+        )
         mock_params.reset_mock()
 
         with self.assertNumQueries(0):
@@ -310,3 +341,24 @@ class LtiConsumerPluginApiTestCase(CMSTestCase):
 
         mock_params.assert_not_called()
         translation.deactivate()
+
+        # Check that cache is set separately for each user
+        request = create_request({"user_id": "admin"})
+        with self.assertNumQueries(1):
+            view_set.get_context(request, "v1.0", model_instance.pk)
+
+        mock_params.assert_called_once_with(user_infos={"user_id": "admin"}, edit=False)
+        mock_params.reset_mock()
+
+        request = create_request({"user_id": "edx"})
+        with self.assertNumQueries(1):
+            view_set.get_context(request, "v1.0", model_instance.pk)
+
+        mock_params.assert_called_once_with(user_infos={"user_id": "edx"}, edit=False)
+        mock_params.reset_mock()
+
+        request = create_request({"user_id": "admin"})
+        with self.assertNumQueries(0):
+            view_set.get_context(request, "v1.0", model_instance.pk)
+
+        mock_params.assert_not_called()

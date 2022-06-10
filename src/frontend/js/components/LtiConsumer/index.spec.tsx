@@ -1,7 +1,12 @@
 import { act, render } from '@testing-library/react';
 import { IntlProvider } from 'react-intl';
 import fetchMock from 'fetch-mock';
-
+import { hydrate, QueryClientProvider } from 'react-query';
+import {
+  ContextFactory as mockContextFactory,
+  PersistedClientFactory,
+  QueryStateFactory,
+} from 'utils/test/factories';
 import { Deferred } from 'utils/test/deferred';
 import {
   LtiConsumerContentParameters,
@@ -9,16 +14,26 @@ import {
   LtiConsumerProps,
 } from 'types/LtiConsumer';
 import { handle } from 'utils/errors/handle';
+import BaseSessionProvider from 'data/SessionProvider/BaseSessionProvider';
+import createQueryClient from 'utils/react-query/createQueryClient';
+import { RICHIE_LTI_ANONYMOUS_USER_ID_CACHE_KEY } from 'settings';
 import LtiConsumer from '.';
 
 const mockHandle: jest.Mock<typeof handle> = handle as any;
 jest.mock('utils/errors/handle');
-jest.mock('utils/context', () => jest.fn());
+jest.mock('utils/context', () => ({
+  __esModule: true,
+  default: mockContextFactory().generate(),
+}));
+jest.mock('uuid', () => ({
+  v4: () => 'a-random-uuid',
+}));
 
 describe('components/LtiConsumer', () => {
   afterEach(() => {
     fetchMock.restore();
     jest.resetAllMocks();
+    sessionStorage.clear();
   });
 
   // As HTMLFormElement doesn't implement submit (see https://github.com/jsdom/jsdom/issues/1937),
@@ -63,7 +78,10 @@ describe('components/LtiConsumer', () => {
     } as LtiConsumerProps;
 
     const ltiContextDeferred = new Deferred();
-    fetchMock.get('/api/v1.0/plugins/lti-consumer/1337/context/', ltiContextDeferred.promise);
+    fetchMock.get(
+      '/api/v1.0/plugins/lti-consumer/1337/context/?user_id=a-random-uuid',
+      ltiContextDeferred.promise,
+    );
 
     const { container } = render(
       <IntlProvider locale="en">
@@ -122,7 +140,10 @@ describe('components/LtiConsumer', () => {
     } as LtiConsumerProps;
 
     const ltiContextDeferred = new Deferred();
-    fetchMock.get('/api/v1.0/plugins/lti-consumer/1337/context/', ltiContextDeferred.promise);
+    fetchMock.get(
+      '/api/v1.0/plugins/lti-consumer/1337/context/?user_id=a-random-uuid',
+      ltiContextDeferred.promise,
+    );
 
     const { container } = render(
       <IntlProvider locale="en">
@@ -157,7 +178,10 @@ describe('components/LtiConsumer', () => {
     } as LtiConsumerProps;
 
     const ltiContextDeferred = new Deferred();
-    fetchMock.get('/api/v1.0/plugins/lti-consumer/1337/context/', ltiContextDeferred.promise);
+    fetchMock.get(
+      '/api/v1.0/plugins/lti-consumer/1337/context/?user_id=a-random-uuid',
+      ltiContextDeferred.promise,
+    );
 
     const { container } = render(
       <IntlProvider locale="en">
@@ -176,5 +200,84 @@ describe('components/LtiConsumer', () => {
     const form: HTMLFormElement = container.getElementsByTagName('form')[0];
     expect(iframe).toBeUndefined();
     expect(form).toBeUndefined();
+  });
+
+  it('uses user information when user is authenticated', () => {
+    const { clientState } = PersistedClientFactory({
+      queries: [
+        QueryStateFactory('user', { data: { username: 'johndoe', email: 'johndoe@example.com' } }),
+      ],
+    });
+    const client = createQueryClient();
+    hydrate(client, clientState);
+
+    const ltiContextDeferred = new Deferred();
+    fetchMock.get('/api/v1.0/plugins/lti-consumer/1337/context/', ltiContextDeferred.promise, {
+      query: {
+        lis_person_contact_email_primary: 'johndoe@example.com',
+        lis_person_name_given: 'johndoe',
+        lis_person_sourcedid: 'johndoe',
+        // user_id: 'johndoe',
+      },
+    });
+
+    render(
+      <IntlProvider locale="en">
+        <QueryClientProvider client={client}>
+          <BaseSessionProvider>
+            <LtiConsumer id={1337} />
+          </BaseSessionProvider>
+        </QueryClientProvider>
+      </IntlProvider>,
+    );
+
+    expect(fetchMock.calls()).toHaveLength(1);
+    expect(
+      fetchMock.lastCall(/api\/v1.0\/plugins\/lti-consumer\/1337\/context\//, {
+        method: 'GET',
+        query: {
+          lis_person_contact_email_primary: 'johndoe@example.com',
+          lis_person_name_given: 'johndoe',
+          lis_person_sourcedid: 'johndoe',
+          user_id: 'johndoe',
+        },
+      }),
+    ).toBeDefined();
+    expect(sessionStorage.getItem(RICHIE_LTI_ANONYMOUS_USER_ID_CACHE_KEY)).toBeNull();
+  });
+
+  it('uses a random uuid as user_id when user is not authenticated', () => {
+    const { clientState } = PersistedClientFactory({
+      queries: [QueryStateFactory('user', { data: null })],
+    });
+    const client = createQueryClient();
+    hydrate(client, clientState);
+
+    const ltiContextDeferred = new Deferred();
+    fetchMock.get(
+      '/api/v1.0/plugins/lti-consumer/1337/context/?user_id=a-random-uuid',
+      ltiContextDeferred.promise,
+    );
+
+    render(
+      <IntlProvider locale="en">
+        <QueryClientProvider client={client}>
+          <BaseSessionProvider>
+            <LtiConsumer id={1337} />
+          </BaseSessionProvider>
+        </QueryClientProvider>
+      </IntlProvider>,
+    );
+
+    expect(fetchMock.calls()).toHaveLength(1);
+    expect(
+      fetchMock.lastCall(/api\/v1.0\/plugins\/lti-consumer\/1337\/context\//, {
+        method: 'GET',
+        query: {
+          user_id: 'a-random-uuid',
+        },
+      }),
+    ).toBeDefined();
+    expect(sessionStorage.getItem(RICHIE_LTI_ANONYMOUS_USER_ID_CACHE_KEY)).toBe('a-random-uuid');
   });
 });
